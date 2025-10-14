@@ -30,7 +30,7 @@ except Exception:
 # ---------------------------
 DATA_DIR = Path(__file__).parent
 # fallback path used previously
-fallback = Path(r"C:\Users\aidar\OneDrive\Desktop\МАДИНА\Milk_Digitalization")
+fallback = Path(r"C:\Users\akenz\OneDrive\Desktop\Управление IT проектов\milk\Milk_Digitalization")
 if any(fallback.glob("*.csv")) and not any(DATA_DIR.glob("*.csv")):
     DATA_DIR = fallback
 
