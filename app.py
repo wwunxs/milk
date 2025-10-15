@@ -652,281 +652,227 @@ elif st.session_state['page'] == 'Продукт':
                         st.error(f"❌ Ошибка: {e}")
 
 # ---------------------------
-# --- MODELS & ANALYTICS ---
+# --- MODELS & ANALYTICS (Только D1 и D2) ---
 # ---------------------------
 elif st.session_state['page'] == 'Модели и аналитика':
-    st.title("📊 Модели и аналитика")
-    st.write("Построение регрессионных моделей и визуализация результатов по партиям/измерениям.")
+    st.title("📊 Модели и аналитика — Опыт D1 и D2 (Айран)")
+    st.write("Здесь показаны только два эксперимента: D1 (7 суток) и D2 (14 суток). Отображаются вводные таблицы и итоговые графики.")
 
-    if measurements.empty or samples.empty:
-        st.warning("Measurements.csv и/или Samples.csv пусты — загрузите данные.")
-    else:
-        meas = measurements.copy()
-        if 'actual_numeric' not in meas.columns and 'actual_value' in meas.columns:
-            meas['actual_numeric'] = meas['actual_value'].apply(parse_numeric)
-        pivot = meas.pivot_table(index='sample_id', columns='parameter', values='actual_numeric', aggfunc='first').reset_index()
-        df_all = samples.merge(pivot, on='sample_id', how='left')
+    # =========================
+    # 1) Вводные таблицы
+    # =========================
+    st.subheader("📄 Вводные данные")
+    c1, c2 = st.columns(2)
 
-        st.subheader("Данные (preview)")
-        st.dataframe(df_all.head(50))
+    # Таблица 4 — D1: Айран, 7 суток
+    data_D1 = {
+        "Группа": ["Контроль", "Опыт 1 (добавка 1)", "Опыт 2 (добавка 2)"],
+        "pH": [3.69, 3.65, 3.51],
+        "°T": [91, 92, 97],
+        "LAB (КОЕ/см³)": [1.2e6, 1.6e6, 2.1e6],
+    }
+    df_D1 = pd.DataFrame(data_D1)
+    df_D1["log10(LAB)"] = np.log10(df_D1["LAB (КОЕ/см³)"].astype(float))
 
-        # choose product filter optionally
-        prod_options = ["Все"]
-        if not products.empty and 'product_id' in products.columns and 'name' in products.columns:
-            for _, r in products[['product_id','name']].dropna().iterrows():
-                try:
-                    prod_options.append(f"{int(r['product_id'])} - {r['name']}")
-                except Exception:
-                    pass
-        prod_filter = st.selectbox("Фильтр по продукту (опционально)", options=prod_options, index=0)
-        if prod_filter != "Все":
-            try:
-                pidf = int(prod_filter.split(' - ')[0])
-                df_all = df_all[df_all['product_id'] == pidf]
-            except Exception:
-                pass
+    with c1:
+        st.markdown("**Таблица 4. D1 — Айран (7 суток)**")
+        st.dataframe(df_D1, use_container_width=True)
 
-        ignore_cols = ['sample_id','product_id','reg_number','date_received','storage_days','conditions','notes']
-        possible = [c for c in df_all.columns if c not in ignore_cols]
-        if not possible:
-            st.warning("Нет признаков для моделирования (посмотри Measurements.csv и Samples.csv).")
-        else:
-            target = st.selectbox("Target (целевая переменная)", options=possible, index=0)
-            features_default = [c for c in ['Белок','Жир','Влага','storage_days'] if c in df_all.columns][:3]
-            features = st.multiselect("Features (признаки)", options=[c for c in possible if c != target], default=features_default)
+    # Таблица 5 — D2: Айран, 14 суток
+    data_D2 = {
+        "Группа": ["Контроль", "Опыт 1", "Опыт 2"],
+        "Белок %": [1.96, 2.05, 2.23],
+        "Углеводы %": [2.73, 3.06, 3.85],
+        "Жир %": [2.05, 1.93, 2.71],
+        "Влага %": [92.56, 92.26, 90.40],
+        "АОА вод. (мг/г)": [0.10, 0.15, 0.12],
+        "АОА жир (мг/г)": [0.031, 0.043, 0.041],
+        "VitC (мг/100г)": [0.880, 0.904, 0.897],
+    }
+    df_D2 = pd.DataFrame(data_D2)
 
-            st.markdown("**Параметры обучения**")
-            test_size = st.slider("Тестовая доля", 0.1, 0.5, 0.3)
-            scale_display = st.checkbox("Показать корреляционную матрицу", value=True)
-
-            if not features:
-                st.info("Выберите как минимум один признак.")
-            else:
-                dataset = df_all[[target] + features].dropna()
-                st.write("Строк доступных для обучения:", len(dataset))
-                if len(dataset) < 5:
-                    st.warning("Недостаточно данных (нужно ≥5 строк).")
-                else:
-                    X = dataset[features].astype(float).values
-                    y = dataset[target].astype(float).values
-
-                    if scale_display:
-                        st.subheader("Корреляционная матрица (features + target)")
-                        corr = dataset.corr(numeric_only=True)
-                        fig, ax = plt.subplots(figsize=(8,6))
-                        sns.heatmap(corr, annot=True, fmt=".2f", ax=ax, cmap="RdYlBu_r", center=0)
-                        st.pyplot(fig)
-
-                    if SKLEARN:
-                        st.subheader("Настройки модели")
-                        col1, col2 = st.columns(2)
-                        with col1:
-                            alg = st.selectbox("Алгоритм", ["Linear","Ridge","Lasso"], index=0)
-                        with col2:
-                            random_state = st.number_input("Random State", value=42, min_value=0)
-
-                        alpha = None
-                        if alg in ["Ridge","Lasso"]:
-                            alpha = st.number_input("alpha (регуляризация)", value=1.0, format="%.4f", min_value=0.0)
-
-                        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=test_size, random_state=random_state)
-                        Model = LinearRegression if alg=="Linear" else (Ridge if alg=="Ridge" else Lasso)
-                        model = Model() if alpha is None else Model(alpha=alpha)
-                        model.fit(X_train, y_train)
-                        y_pred = model.predict(X_test)
-
-                        r2 = r2_score(y_test, y_pred)
-                        mse = mean_squared_error(y_test, y_pred)
-                        rmse = np.sqrt(mse)
-                        mae = mean_absolute_error(y_test, y_pred)
-
-                        st.subheader("📊 Результаты модели")
-                        col1, col2, col3 = st.columns(3)
-                        with col1:
-                            st.metric("R² (точность)", f"{r2:.4f}",
-                                      delta="Хорошо" if r2 > 0.7 else "Удовл." if r2 > 0.5 else "Слабо")
-                        with col2:
-                            st.metric("RMSE (ошибка)", f"{rmse:.4f}")
-                        with col3:
-                            st.metric("MAE (ошибка)", f"{mae:.4f}")
-
-                        # Доп. метрика MAPE (если возможно)
-                        if np.all(np.abs(y_test) > 1e-12):
-                            mape = np.mean(np.abs((y_test - y_pred) / np.clip(np.abs(y_test), 1e-12, None))) * 100
-                            st.metric("MAPE (%)", f"{mape:.2f}")
-
-                        # coefficients
-                        try:
-                            coefs = dict(zip(features, np.atleast_1d(model.coef_)))
-                            intercept_val = float(model.intercept_)
-
-                            st.subheader("🔍 Коэффициенты модели")
-                            coef_df = pd.DataFrame.from_dict(coefs, orient='index', columns=['Коэффициент'])
-                            coef_df['Влияние'] = coef_df['Коэффициент'].apply(
-                                lambda x: '📈 Положительное' if x > 0 else '📉 Отрицательное' if x < 0 else '➖ Нулевое'
-                            )
-                            st.dataframe(coef_df.round(6))
-
-                            # Equation
-                            equation = f"{target} = "
-                            for i, (feat, coef) in enumerate(coefs.items()):
-                                if i == 0:
-                                    equation += f"{coef:.4f}×{feat}"
-                                else:
-                                    sign = " + " if coef >= 0 else " - "
-                                    equation += f"{sign}{abs(coef):.4f}×{feat}"
-                            equation += f" + {intercept_val:.4f}"
-                            st.code(equation, language='python')
-
-                        except Exception as e:
-                            st.warning(f"Не удалось получить коэффициенты: {e}")
-
-                        # Visualizations
-                        st.subheader("📈 Визуализации")
-
-                        # Actual vs Predicted and Residuals
-                        fig1, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-
-                        ax1.scatter(y_test, y_pred, alpha=0.7)
-                        lims = [min(y_test.min(), y_pred.min()), max(y_test.max(), y_pred.max())]
-                        ax1.plot(lims, lims, 'r--', lw=2)
-                        ax1.set_xlabel("Фактические значения")
-                        ax1.set_ylabel("Предсказанные значения")
-                        ax1.set_title("Фактические vs Предсказанные")
-                        ax1.grid(True, alpha=0.3)
-
-                        residuals = y_test - y_pred
-                        ax2.scatter(y_pred, residuals, alpha=0.7)
-                        ax2.axhline(y=0, color='red', linestyle='--')
-                        ax2.set_xlabel("Предсказанные значения")
-                        ax2.set_ylabel("Остатки")
-                        ax2.set_title("Остатки модели")
-                        ax2.grid(True, alpha=0.3)
-
-                        st.pyplot(fig1)
-
-                        # Feature importance if multiple features
-                        if len(features) > 1:
-                            st.subheader("📊 Важность признаков")
-                            imp_vals = np.abs(np.atleast_1d(model.coef_))
-                            importance_df = pd.DataFrame({
-                                'Признак': features,
-                                'Важность': imp_vals
-                            }).sort_values('Важность', ascending=False)
-                            if importance_df['Важность'].max() > 0:
-                                importance_df["Отн. важность"] = importance_df["Важность"] / importance_df["Важность"].max()
-
-                            fig2, ax = plt.subplots(figsize=(10, 6))
-                            bars = ax.barh(importance_df['Признак'], importance_df['Важность'])
-                            ax.set_xlabel('Важность (|коэффициента|)')
-                            ax.set_title('Относительная важность признаков')
-
-                            for bar in bars:
-                                width = bar.get_width()
-                                ax.text(width + 0.01, bar.get_y() + bar.get_height()/2,
-                                        f'{width:.4f}', ha='left', va='center')
-
-                            st.pyplot(fig2)
-
-                        # Single feature regression plot
-                        if len(features) == 1:
-                            st.subheader("📈 График зависимости")
-                            fig3, ax = plt.subplots(figsize=(10, 6))
-
-                            x_all = dataset[features[0]].astype(float).values
-                            y_all = dataset[target].astype(float).values
-
-                            ax.scatter(x_all, y_all, alpha=0.6, label='Данные')
-
-                            xs = np.linspace(x_all.min(), x_all.max(), 100)
-                            coef_val = float(np.atleast_1d(model.coef_)[0])
-                            intercept_val = float(model.intercept_)
-                            ax.plot(xs, coef_val*xs + intercept_val, color='red', linewidth=2, label='Линия регрессии')
-
-                            ax.set_xlabel(features[0])
-                            ax.set_ylabel(target)
-                            ax.set_title(f'Зависимость {target} от {features[0]}')
-                            ax.legend()
-                            ax.grid(True, alpha=0.3)
-
-                            st.pyplot(fig3)
-
-                            # Prediction interface
-                            st.subheader("🔮 Прогнозирование")
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                input_val = st.number_input(
-                                    f"Введите значение {features[0]}",
-                                    value=float(np.nanmean(x_all)) if len(x_all) else 0.0,
-                                    format="%.4f"
-                                )
-                            with col2:
-                                prediction = coef_val * input_val + intercept_val
-                                st.metric(f"Предсказанное значение {target}", f"{prediction:.4f}")
-
-                    else:
-                        # fallback: only single feature regression with numpy.polyfit
-                        if len(features) == 1:
-                            st.warning("⚠️ scikit-learn не установлен — используется простая линейная регрессия numpy")
-                            x = X.flatten()
-                            coef = np.polyfit(x, y, 1)
-                            slope, intercept = float(coef[0]), float(coef[1])
-
-                            st.success("**Уравнение регрессии:**")
-                            st.code(f"{target} = {slope:.4f} × {features[0]} + {intercept:.4f}", language='python')
-
-                            y_pred_simple = slope * x + intercept
-                            r2_simple = 1 - np.sum((y - y_pred_simple)**2) / np.sum((y - np.mean(y))**2)
-                            rmse_simple = np.sqrt(np.mean((y - y_pred_simple)**2))
-
-                            col1, col2 = st.columns(2)
-                            with col1:
-                                st.metric("R²", f"{r2_simple:.4f}")
-                            with col2:
-                                st.metric("RMSE", f"{rmse_simple:.4f}")
-
-                            fig, ax = plt.subplots(figsize=(10, 6))
-                            idx = np.argsort(x)
-                            ax.scatter(x, y, alpha=0.7, label='Данные')
-                            ax.plot(x[idx], np.polyval(coef, x[idx]), color='red', linewidth=2, label='Регрессия')
-                            ax.set_xlabel(features[0])
-                            ax.set_ylabel(target)
-                            ax.legend()
-                            ax.grid(True, alpha=0.3)
-                            st.pyplot(fig)
-
-                            # Prediction interface
-                            st.subheader("🔮 Прогнозирование")
-                            input_val = st.number_input(
-                                f"Введите значение {features[0]}",
-                                value=float(np.nanmean(x)) if len(x) else 0.0,
-                                format="%.4f"
-                            )
-                            prediction = slope * input_val + intercept
-                            st.metric(f"Предсказанное значение {target}", f"{prediction:.4f}")
-
-                        else:
-                            st.error("""
-                            ❌ Для работы с несколькими признаками требуется scikit-learn
-
-                            Установите: `pip install scikit-learn`
-
-                            Или используйте только один признак для анализа.
-                            """)
+    with c2:
+        st.markdown("**Таблица 5. D2 — Айран (14 суток)**")
+        st.dataframe(df_D2, use_container_width=True)
 
     st.markdown("---")
-    st.subheader("💡 Рекомендации по улучшению моделей")
 
-    tips = [
-        "✅ Добавьте больше партий и измерений в CSV файлы",
-        "✅ Убедитесь, что данные содержат минимальные выбросы",
-        "✅ Проверьте корреляцию между признаками перед моделированием",
-        "✅ Используйте перекрестную проверку для оценки устойчивости модели",
-        "✅ Рассмотрите возможность добавления полиномиальных признаков",
-        "✅ Нормализуйте данные для лучшей сходимости алгоритмов"
-    ]
-    for tip in tips:
-        st.write(tip)
+    # =========================
+    # 2) Итоговые графики
+    # =========================
+    st.subheader("📈 Итоговые графики")
+
+    tab1, tab2, tab3 = st.tabs(["D1: кислотность и LAB", "D2: состав и свойства", "Моделирование pH"])
+
+    # -------- TAB 1: D1 --------
+    with tab1:
+        # Гистограмма pH + линия log10(LAB)
+        fig, ax1 = plt.subplots(figsize=(8,5))
+        ax1.bar(df_D1["Группа"], df_D1["pH"])
+        ax1.set_ylabel("pH")
+        ax1.set_title("D1 (7 суток): кислотность и рост LAB")
+
+        ax2 = ax1.twinx()
+        ax2.plot(df_D1["Группа"], df_D1["log10(LAB)"], marker="o", linewidth=2)
+        ax2.set_ylabel("log10(LAB)")
+
+        st.pyplot(fig, use_container_width=True)
+
+    # -------- TAB 2: D2 --------
+    with tab2:
+        # Состав (Белок/Углеводы/Жир)
+        df_comp = df_D2.melt(id_vars="Группа",
+                             value_vars=["Белок %", "Углеводы %", "Жир %"],
+                             var_name="Показатель", value_name="Значение")
+
+        fig1, ax = plt.subplots(figsize=(8,5))
+        # сгруппированные столбцы
+        groups = df_comp["Группа"].unique()
+        cats = df_comp["Показатель"].unique()
+        x = np.arange(len(groups))
+        width = 0.8 / len(cats)
+
+        for i, cat in enumerate(cats):
+            vals = df_comp[df_comp["Показатель"] == cat]["Значение"].values
+            ax.bar(x + i*width - (len(cats)-1)*width/2, vals, width=width, label=cat)
+
+        ax.set_xticks(x); ax.set_xticklabels(groups)
+        ax.set_ylabel("Процент содержания (%)")
+        ax.set_title("D2 (14 суток): состав айрана")
+        ax.legend()
+        st.pyplot(fig1, use_container_width=True)
+
+        # АОА (водная фаза) и витамин C
+        fig2, axes = plt.subplots(1, 2, figsize=(12,5))
+        axes[0].bar(df_D2["Группа"], df_D2["АОА вод. (мг/г)"])
+        axes[0].set_title("АОА (водная фаза)")
+        axes[0].set_ylabel("АОА, мг/г")
+
+        axes[1].bar(df_D2["Группа"], df_D2["VitC (мг/100г)"])
+        axes[1].set_title("Витамин C")
+        axes[1].set_ylabel("VitC, мг/100г")
+
+        plt.suptitle("D2: функциональные свойства", fontsize=14)
+        st.pyplot(fig2, use_container_width=True)
+
+    # -------- TAB 3: Моделирование pH --------
+    with tab3:
+        # Экспериментальные данные времени/ pH
+        time = np.array([2, 4, 6, 8, 10])
+        ph_control = np.array([4.515, 4.433, 4.386, 4.352, 4.325])
+        ph_exp1 = np.array([4.464, 4.394, 4.352, 4.323, 4.300])
+        ph_exp2 = np.array([4.419, 4.333, 4.282, 4.246, 4.218])
+
+        st.markdown("**Динамика pH (контроль, опыт 1, опыт 2)**")
+        fig0, ax0 = plt.subplots(figsize=(8,5))
+        ax0.plot(time, ph_control, 'o-', label='Контроль')
+        ax0.plot(time, ph_exp1, 's-', label='Опыт 1')
+        ax0.plot(time, ph_exp2, '^-', label='Опыт 2')
+        ax0.set_xlabel('Время ферментации, ч'); ax0.set_ylabel('pH')
+        ax0.set_title('Сравнение динамики pH (2–10 ч)')
+        ax0.grid(True, alpha=0.3); ax0.legend()
+        st.pyplot(fig0, use_container_width=True)
+
+        st.markdown("**Модели для pH(t): логарифмическая и гиперболическая (без SciPy)**")
+
+        # Примерные лабораторные данные (как в твоём коде для подгонки)
+        t_fit = np.array([1, 2, 3, 4, 5, 6, 8, 10], dtype=float)
+        pH_exp = np.array([4.65, 4.50, 4.33, 4.20, 4.05, 3.90, 3.78, 3.70], dtype=float)
+
+        # --- Логарифмическая модель: y = α - β ln(t)
+        # линейная регрессия по признаку ln(t): y = c0 + c1*ln(t) => α=c0, β=-c1
+        ln_t = np.log(t_fit)
+        c1, c0 = np.polyfit(ln_t, pH_exp, 1)  # y = c1*ln(t) + c0
+        alpha = c0
+        beta = -c1
+
+        # --- Гиперболическая модель: y = a + b/t
+        inv_t = 1.0 / t_fit
+        m, a_intercept = np.polyfit(inv_t, pH_exp, 1)  # y = m*(1/t) + a_intercept
+        a = a_intercept
+        b = m
+
+        # Прогнозные кривые
+        t_pred = np.linspace(1, 10, 100)
+        pH_log_pred = alpha - beta * np.log(t_pred)
+        pH_inv_pred = a + b / t_pred
+
+        # Визуализация подгонки
+        fig1, ax1 = plt.subplots(figsize=(8,5))
+        ax1.scatter(t_fit, pH_exp, color='black', label='Экспериментальные точки')
+        ax1.plot(t_pred, pH_log_pred, label='Логарифмическая модель  pH = α - β ln(t)')
+        ax1.plot(t_pred, pH_inv_pred, linestyle='--', label='Гиперболическая модель  pH = a + b/t')
+        ax1.set_xlabel('Время ферментации, ч'); ax1.set_ylabel('pH')
+        ax1.set_title('Моделирование динамики pH при ферментации айрана')
+        ax1.grid(True, alpha=0.3); ax1.legend()
+        st.pyplot(fig1, use_container_width=True)
+
+        st.markdown("**Оценённые параметры моделей:**")
+        st.code(
+            f"Логарифмическая:  pH(t) = {alpha:.3f} - {beta:.3f} · ln(t)\n"
+            f"Гиперболическая:  pH(t) = {a:.3f} + {b:.3f} / t",
+            language="text"
+        )
+
+        # Доп. графики по опытам
+        st.markdown("**Дополнительные графики:**")
+
+        # Опыт 1: кривая pH
+        fig2, ax2 = plt.subplots(figsize=(6,4))
+        ax2.plot(time, ph_exp1, 'o-', label='Опыт 1 (модель)')
+        ax2.set_xlabel('Время, ч'); ax2.set_ylabel('Прогнозируемый pH')
+        ax2.set_title('Опыт 1: динамика pH')
+        ax2.grid(True, alpha=0.3); ax2.legend()
+        st.pyplot(fig2, use_container_width=True)
+
+        # Опыт 1: поверхность отклика pH(t, dose)
+        # pH = 4.535 - 0.102 ln(t) - 0.02 * dose
+        from mpl_toolkits.mplot3d import Axes3D  # noqa: F401
+        tgrid = np.linspace(2, 10, 30)
+        dose = np.linspace(0, 3, 30)
+        T, D = np.meshgrid(tgrid, dose)
+        pH_surface_exp1 = 4.535 - 0.102 * np.log(T) - 0.02 * D
+
+        fig3 = plt.figure(figsize=(6,4))
+        ax3 = fig3.add_subplot(111, projection='3d')
+        surf = ax3.plot_surface(D, T, pH_surface_exp1, cmap='autumn')
+        ax3.set_xlabel('Доза добавки 1, %')
+        ax3.set_ylabel('Время, ч')
+        ax3.set_zlabel('pH')
+        ax3.set_title('Опыт 1: поверхность отклика pH(t, доза)')
+        fig3.colorbar(surf, shrink=0.6, aspect=10)
+        st.pyplot(fig3, use_container_width=True)
+
+        # Опыт 2: кривая pH
+        fig4, ax4 = plt.subplots(figsize=(6,4))
+        ax4.plot(time, ph_exp2, 'o-', label='Опыт 2 (модель)')
+        ax4.set_xlabel('Время, ч'); ax4.set_ylabel('Прогнозируемый pH')
+        ax4.set_title('Опыт 2: динамика pH')
+        ax4.grid(True, alpha=0.3); ax4.legend()
+        st.pyplot(fig4, use_container_width=True)
+
+        # Опыт 2: обратная зависимость (pH -> время)
+        fig5, ax5 = plt.subplots(figsize=(6,4))
+        ax5.plot(ph_exp2, time, 's-')
+        ax5.set_xlabel('pH'); ax5.set_ylabel('Время ферментации, ч')
+        ax5.set_title('Опыт 2: обратная зависимость (pH → t)')
+        ax5.grid(True, alpha=0.3)
+        st.pyplot(fig5, use_container_width=True)
+
+        # Сравнение контроль / опыт 1 / опыт 2 — вместе
+        fig6, ax6 = plt.subplots(figsize=(7,5))
+        ax6.plot(time, ph_control, 'o-', label='Контроль')
+        ax6.plot(time, ph_exp1, 's-', label='Опыт 1')
+        ax6.plot(time, ph_exp2, '^-', label='Опыт 2')
+        ax6.set_xlabel('Время ферментации, ч'); ax6.set_ylabel('pH')
+        ax6.set_title('Сравнение: Контроль vs Опыт 1 vs Опыт 2')
+        ax6.grid(True, alpha=0.3); ax6.legend()
+        st.pyplot(fig6, use_container_width=True)
+
+        st.markdown("**Краткая интерпретация:**")
+        st.write("- Снижение pH и рост LAB указывают на активное брожение; максимальный LAB — в опыте 2 (D1).")
+        st.write("- На 14-е сутки (D2) повышаются белок и углеводы; баланс жира/влаги зависит от добавок.")
+        st.write("- Оценённые модели pH(t) (логарифм/гипербола) демонстрируют замедление снижения pH к стационарной стадии.")
 
 # ---------------------------
 # --- Footer ---
